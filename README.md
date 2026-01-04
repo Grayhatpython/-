@@ -7,13 +7,11 @@ EVE-NG 환경에서 **멀티 ISP(Primary/Backup) + 캠퍼스 VLAN 분리 + DHCP 
 ---
 
 ## 1) Topology
-<img width="1000" height="1266" alt="topology" src="https://github.com/user-attachments/assets/f32f990d-a1d3-4efb-910a-8be1673dc0c2" />
+<img width="1339" height="1216" alt="스크린샷 2026-01-05 062954" src="https://github.com/user-attachments/assets/0638ed5a-f4df-4ab2-9294-9e83c534bcbe" />
 
 
 ### 계층 구성(단순화)
 - **Core 계층 별도 구성 없음**: Core/Distribution을 분리한 3-Tier 풀스케일 구조가 아니라, 학습/검증 범위를 고려해 **Edge ↔ Distribution/Gateway ↔ Access**로 단순화했습니다.
-- **Distribution(게이트웨이) 계층 이중화는 “물리적으로 2대” 구성**했지만, 본 버전에서는 **FHRP(HSRP/VRRP) 기반 게이트웨이 이중화는 적용하지 않았습니다.**  
-  (이유: 랩 범위 대비 변경점이 커져 1차 버전은 Edge/ISP/BGP/NAT/DHCP 중심으로 완성)
 
 ---
 
@@ -22,9 +20,25 @@ EVE-NG 환경에서 **멀티 ISP(Primary/Backup) + 캠퍼스 VLAN 분리 + DHCP 
 - **VLAN 분리 + SVI 기반 Inter-VLAN Routing**
   - VLAN 10: 192.168.1.0/24 (User)
   - VLAN 20: 192.168.2.0/24 (User)
+  - VLAN 99: 192.168.0.0/28 (Management)
   - VLAN 100: 100.1.1.32/28 (Server/Public Segment)
   - Distribution에서 SVI를 통해 VLAN 간 라우팅 수행
 
+- **EtherChannel (L2 Trunk)**
+  - Dist ↔ Dist 구간을 Port-Channel로 묶어 안정성/대역폭 확보
+
+- **STP VLAN별 Root 설계**
+  - VLAN10, VLAN20 각각 Root Primary/Secondary 또는 Priority로 루트 분리(로드 분산 가능)
+
+- **HSRP(게이트웨이 이중화)**
+  - VLAN10/20의 Default Gateway를 VIP(가상 IP) 로 통일
+  - 장애 시 Gateway가 끊기지 않도록 구성
+
+- **OSPF(내부 라우팅)**
+  - Dist, Edge 내부 라우팅 활성화
+  - SVI는 Passive로 전환하여 불필요한 OSPF 인접 형성/ECMP 혼선 방지
+  - Dist-Dist 링크가 L2라 OSPF neighbor 생기지 않음
+  
 - **DHCP 운영**
   - DHCP 서버: 192.168.2.100(VLAN 20)
   - 사용자 단말은 DHCP로 IP 수신(필요 시 `ip helper-address`로 릴레이 구성)
@@ -58,6 +72,7 @@ EVE-NG 환경에서 **멀티 ISP(Primary/Backup) + 캠퍼스 VLAN 분리 + DHCP 
 |---|---|---|
 | VLAN 10 | 192.168.1.0/24 | 사용자 |
 | VLAN 20 | 192.168.2.0/24 | 사용자, DHCP Server(192.168.2.100) |
+| VLAN 10 | 192.168.1.0/24 | 관리 |
 | VLAN 100 | 100.1.1.32/28 | 서버(예: 100.1.1.33) |
 
 ### Edge ↔ Distribution L3 Links
@@ -173,27 +188,7 @@ DHCP가 안 될 때, 라우팅부터 보기보다 먼저 아래를 확인했습�
 
 ---
 
-### (2) `no vlan 100` 했는데도 `Vlan100` 인터페이스가 남아 있음
-**원인**
-- `no vlan 100`은 VLAN(DB)만 삭제, SVI는 별도 객체
-
-**해결**
-- `no interface vlan 100`으로 SVI까지 제거
-
----
-
-### (3) EVE-NG에서 VLAN/SVI 상태가 가끔 꼬이는 현상
-**증상**
-- 조건이 맞는데도 SVI가 down 유지
-- 지웠다 다시 만들면 정상 up
-
-**조치**
-- 구성 순서 정리( VLAN → 포트/트렁크 → SVI )
-- 그래도 이상하면 노드 reload 또는 재생성
-
----
-
-### (4) IP SLA / Track 기반 전환에서 “복구가 안 되는” 문제
+### (2) IP SLA / Track 기반 전환에서 “복구가 안 되는” 문제
 **증상**
 - 주 회선 복구 후에도 `show track` down 유지
 - 특정 대상은 g0/2에서는 ping 되는데 g0/1에서는 실패
@@ -208,18 +203,7 @@ DHCP가 안 될 때, 라우팅부터 보기보다 먼저 아래를 확인했습�
 
 ---
 
-### (5) DHCP가 안 될 때: MAC 학습/Trunk/VLAN 존재 여부로 먼저 좁히기
-**증상**
-- 단말이 IP를 못 받음
-
-**점검**
-1) `show mac address-table`로 단말 MAC이 포트에서 보이는지  
-2) Access VLAN이 맞는지 / Trunk allowed VLAN에 포함되는지  
-3) STP로 차단된 링크가 있는지
-
----
-
-### (6) 서버가 다른 서브넷인데 응답이 없던 문제
+### (3) 서버가 다른 서브넷인데 응답이 없던 문제
 **증상**
 - 서버(또는 DHCP/Syslog/분석 서버)가 다른 서브넷에 있을 때,
   같은 VLAN에서는 보이는데 외부(다른 VLAN/외부망)에서는 응답이 불안정/없음
@@ -234,6 +218,106 @@ DHCP가 안 될 때, 라우팅부터 보기보다 먼저 아래를 확인했습�
 - 서버에서 `route print`/`ip route` 확인, 다른 VLAN에서 ping/접속 테스트
 
 ---
+
+### (4) DHCP: 서버는 Lease를 잡았는데 클라이언트는 0.0.0.0
+**증상**
+<img width="710" height="394" alt="스크린샷 2026-01-05 025626" src="https://github.com/user-attachments/assets/433729a7-49e4-4d2c-ad5e-d9386cc4a8aa" />
+- VPCS에서 show ip 결과: 0.0.0.0/0
+
+<img width="749" height="227" alt="스크린샷 2026-01-05 025619" src="https://github.com/user-attachments/assets/11738ad9-9a5f-4f6d-b20e-1ac7a41cdee1" />
+- DHCP 서버에서는 바인딩이 잡힘:
+- show ip dhcp binding에 192.168.1.11 할당 기록 존재
+
+<img width="715" height="422" alt="스크린샷 2026-01-05 025606" src="https://github.com/user-attachments/assets/7d5b2dd2-02fc-40f1-bf11-efd41b7ed9d9" />
+- debug ip dhcp server packet/events에서
+- DHCPDISCOVER received ... through relay 192.168.1.2
+- Sending DHCPOFFER ... (192.168.1.11)
+- unicasting BOOTREPLY ... to relay 192.168.1.2
+
+<img width="908" height="747" alt="스크린샷 2026-01-05 025743" src="https://github.com/user-attachments/assets/e22a239e-0df9-471e-aa8d-7b252b58ca00" />
+
+**원인**
+<img width="825" height="250" alt="스크린샷 2026-01-05 034847" src="https://github.com/user-attachments/assets/ed96817e-6142-4ca9-b873-1ee9f4511630" />
+- HSRP로 게이트웨이를 가상 IP(VIP) 로 바꿨는데,
+- DHCP pool의 default-router가 예전 게이트웨이 값으로 남아 있음
+
+**해결**
+- DHCP pool의 기본 게이트웨이를 HSRP VIP로 수정
+
+**검증**
+- VPCS에서 DHCP 재요청 후 IP/GW 정상 수신
+
+---
+
+### (5) HSRP 상태 이상(Init/unknown)
+**증상**
+<img width="729" height="438" alt="스크린샷 2026-01-05 033131" src="https://github.com/user-attachments/assets/2263d320-2379-42bf-b854-696bbbe6b312" />
+- show standby brief에서 VLAN별 상태가 Init / unknown으로 표기되며 active/standby 정상 수립되지 않음
+
+**원인**
+- 해당 VLAN의 SVI가 down/down (VLAN이 안 올라오면 HSRP Init)
+
+**해결**
+- 해당 VLAN SVI -> no shutdown
+
+**검증**
+- show standby brief에서 정상 수립 확인
+
+---
+
+### (5) OSPF 라우트가 VLAN10/20/100으로 “3갈래 ECMP”로 보임
+**증상**
+- show ip route에서 같은 목적지(예: 10.1.1.0/30)가
+- via 192.168.2.2 (Vlan20)
+- via 192.168.1.2 (Vlan10)
+- via 100.1.1.40 (Vlan100)
+처럼 여러 SVI를 next-hop으로 갖는 형태로 표시
+
+**원인**
+- 사용자 VLAN SVI에서 OSPF를 활성화하여, 해당 SVI들이 OSPF 이웃으로 인식되었고,
+- 그 결과 동일 목적지에 대해 다수의 동일 비용 경로(ECMP)가 생성되었다.
+
+**해결**
+- SVI는 Passive로 전환하고, OSPF neighbor는 “진짜 L3 uplink”에서만 형성
+- passive-interface vlan number
+
+**검증**
+- show ip route ospf
+  
+---
+
+### (6) 외부(8.8.8.8) ping 실패 — “ICMP type 3 code 1 host unreachable
+**증상**
+<img width="670" height="432" alt="스크린샷 2026-01-05 041338" src="https://github.com/user-attachments/assets/c8570bd5-62d4-488e-b99e-2191bdf5b8be" />
+- ping 8.8.8.8 결과 : Destination host unreachable가 192.168.2.2에서 반환
+
+**원인**
+- 패킷이 192.168.2.2(중간 L3 장비)까지는 갔지만 그 장비가 외부로 나갈 기본 경로(default route) 를 몰라서 드롭
+
+**해결**
+- L3 장비(Distribution)에 default route 추가
+
+**검증**
+- ping 8.8.8.8
+
+---
+
+### (7) SSH timeout
+**증상**
+- 관리 PC(라우터)에서 SSH 시도 시 : % Connection timed out; remote host not responding
+
+**원인**
+- Loopback 인터페이스는 관리용 식별 주소로 유용하지만, L2 Access 스위치에서 Loopback만 존재하는 경우
+- 실제 패킷을 송수신할 L3 출구 인터페이스가 없어 SSH와 같은 관리 트래픽의 응답을 전송할 수 없다.
+- 따라서 L2 스위치의 관리 접속을 위해서는 Management VLAN의 SVI가 필요하며, 네트워크 분리 시에는 default gateway까지 함께 고려해야 한다.
+
+**해결**
+- Management VLAN99을 만들고, Access 스위치에는 VLAN99 SVI(관리 IP) 를 부여
+- (서로 다른 대역에서 접속한다면) Access 스위치에 ip default-gateway <VLAN99_VIP> 설정
+- Trunk에 VLAN99 허용
+
+**검증**
+- ssh -l [user] [ip]
 
 ---
 
@@ -284,11 +368,9 @@ DHCP가 안 될 때, 라우팅부터 보기보다 먼저 아래를 확인했습�
 - **트래픽 분산(중요/일반 트래픽 분리)**
   - PBR로 소스/서비스 기반 출구 ISP 선택
   - BGP 정책(Local-Pref/AS-Path)로 인바운드/아웃바운드 제어
-- **FHRP(HSRP/VRRP) 기반 게이트웨이 이중화**(2차 버전)
 - **SPAN + 중앙 Syslog 수집 서버 구성**
 - **Access Port Security 정책 고도화**
 - **VLAN hopping 대응 설정을 템플릿화(Access/Trunk 공통 정책)**
-- **원격 접속**
 
 ---
 
