@@ -247,14 +247,18 @@ DHCP가 안 될 때, 라우팅부터 보기보다 먼저 아래를 확인했습�
 
 ### (4) DHCP: 서버는 Lease를 잡았는데 클라이언트는 0.0.0.0
 **증상**
+
 <img width="710" height="394" alt="스크린샷 2026-01-05 025626" src="https://github.com/user-attachments/assets/433729a7-49e4-4d2c-ad5e-d9386cc4a8aa" />
+
 - VPCS에서 show ip 결과: 0.0.0.0/0
 
 <img width="749" height="227" alt="스크린샷 2026-01-05 025619" src="https://github.com/user-attachments/assets/11738ad9-9a5f-4f6d-b20e-1ac7a41cdee1" />
+
 - DHCP 서버에서는 바인딩이 잡힘:
 - show ip dhcp binding에 192.168.1.11 할당 기록 존재
 
 <img width="715" height="422" alt="스크린샷 2026-01-05 025606" src="https://github.com/user-attachments/assets/7d5b2dd2-02fc-40f1-bf11-efd41b7ed9d9" />
+
 - debug ip dhcp server packet/events에서
 - DHCPDISCOVER received ... through relay 192.168.1.2
 - Sending DHCPOFFER ... (192.168.1.11)
@@ -263,7 +267,9 @@ DHCP가 안 될 때, 라우팅부터 보기보다 먼저 아래를 확인했습�
 <img width="908" height="747" alt="스크린샷 2026-01-05 025743" src="https://github.com/user-attachments/assets/e22a239e-0df9-471e-aa8d-7b252b58ca00" />
 
 **원인**
+
 <img width="825" height="250" alt="스크린샷 2026-01-05 034847" src="https://github.com/user-attachments/assets/ed96817e-6142-4ca9-b873-1ee9f4511630" />
+
 - HSRP로 게이트웨이를 가상 IP(VIP) 로 바꿨는데,
 - DHCP pool의 default-router가 예전 게이트웨이 값으로 남아 있음
 
@@ -277,7 +283,9 @@ DHCP가 안 될 때, 라우팅부터 보기보다 먼저 아래를 확인했습�
 
 ### (5) HSRP 상태 이상(Init/unknown)
 **증상**
+
 <img width="729" height="438" alt="스크린샷 2026-01-05 033131" src="https://github.com/user-attachments/assets/2263d320-2379-42bf-b854-696bbbe6b312" />
+
 - show standby brief에서 VLAN별 상태가 Init / unknown으로 표기되며 active/standby 정상 수립되지 않음
 
 **원인**
@@ -314,7 +322,9 @@ DHCP가 안 될 때, 라우팅부터 보기보다 먼저 아래를 확인했습�
 
 ### (6) 외부(8.8.8.8) ping 실패 — “ICMP type 3 code 1 host unreachable
 **증상**
+
 <img width="670" height="432" alt="스크린샷 2026-01-05 041338" src="https://github.com/user-attachments/assets/c8570bd5-62d4-488e-b99e-2191bdf5b8be" />
+
 - ping 8.8.8.8 결과 : Destination host unreachable가 192.168.2.2에서 반환
 
 **원인**
