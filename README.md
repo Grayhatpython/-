@@ -119,14 +119,14 @@ EVE-NG 환경에서 **멀티 ISP(Primary/Backup) + 캠퍼스 VLAN 분리 + DHCP 
 - Object Tracking으로 IP SLA 상태를 추적
 - Tracking 상태에 따라 Default Route를 자동으로 활성/비활성화
 
-ip sla 1
- icmp-echo 8.8.8.8 source-interface GigabitEthernet0/0
-ip sla schedule 1 life forever start-time now
+- ip sla 1
+- icmp-echo 8.8.8.8 source-interface GigabitEthernet0/0
+- ip sla schedule 1 life forever start-time now
 
-track 1 ip sla 1 reachability
+- track 1 ip sla 1 reachability
 
-ip route 0.0.0.0 0.0.0.0 100.1.1.1 track 1     ! ISP1 (Primary)
-ip route 0.0.0.0 0.0.0.0 100.1.1.17 5          ! ISP2 (Backup)
+- ip route 0.0.0.0 0.0.0.0 100.1.1.1 track 1     ! ISP1 (Primary)
+- ip route 0.0.0.0 0.0.0.0 100.1.1.17 5          ! ISP2 (Backup)
 
 ---
 
