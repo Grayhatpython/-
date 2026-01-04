@@ -57,6 +57,11 @@ EVE-NG 환경에서 **멀티 ISP(Primary/Backup) + 캠퍼스 VLAN 분리 + DHCP 
   - 내부 사용자 → 서버 접근/원격 접속(SSH/RDP 등) 시나리오를 염두에 두고 설계  
   - 외부 사용자 접근은 “공인 대역 광고/라우팅 + 보안 정책(ACL/방화벽)”을 전제로 확장 가능하도록 구성(Backlog 참고)
 
+- **Management VLAN을 활용한 네트워크 장비 관리**
+  - 스위치 장비마다 Management VLAN SVI에 관리 IP 할당
+  - SSH를 통해서만 장비 접근 허용
+  - 사용자 VLAN에서는 장비 관리 접근 불가
+
 ---
 
 ## 3) Addressing Plan
@@ -84,23 +89,44 @@ EVE-NG 환경에서 **멀티 ISP(Primary/Backup) + 캠퍼스 VLAN 분리 + DHCP 
 ---
 
 ## 4) Routing / ISP 설계
-### 기본 방향(1차 버전)
-- ISP1을 **기본 경로(Primary)**로 사용
-- ISP1 장애 시 ISP2로 **자동 전환(Backup)**
 
-### 내부 라우팅(IGP)
-- Edge ↔ Distribution 구간에서는 내부 대역(192.168.1.0/24, 192.168.2.0/24, 100.1.1.32/28)을 동적 라우팅(OSPF)으로 학습하도록 구성했습니다.
-- ISP 방향 Default route는 정책/전환 실습을 위해 Edge에서 제어했습니다.
+### 기본 방향 (1차 버전)
+- ISP1을 **기본 경로(Primary)** 로 사용
+- ISP1 장애 발생 시 ISP2로 **자동 전환(Backup)** 되도록 설계
 
-### 트래픽 분산(로드밸런싱) 계획
-“Primary/Backup”만으로는 트래픽 분산이 자동으로 되지 않습니다.  
-중요 트래픽은 ISP1, 일반 트래픽은 ISP2로 보내는 형태의 **의도적인 분산**은 다음 중 하나가 필요합니다.
+---
 
-- **PBR(Policy-Based Routing)**: 소스/목적지/포트 기반으로 출구 ISP 선택
-- **BGP 정책(Local-Pref, AS-Path Prepending 등)**: 경로 선호도를 조정해 유입/유출 흐름을 제어
-- **ECMP + 세션 일관성 고려**: 단순 equal-cost만으로는 NAT/세션 유지에 문제가 생길 수 있어 설계가 필요
+### 내부 라우팅 (IGP)
+- Edge ↔ Distribution 구간에서는 내부 네트워크 대역
+  - `192.168.1.0/24`
+  - `192.168.2.0/24`
+  - `100.1.1.32/28`
+  를 **OSPF를 통해 동적으로 학습**하도록 구성했습니다.
+- 사용자 VLAN 및 서버 대역은 Distribution에서 OSPF로 광고하고,
+  ISP 방향 Default Route는 **Edge 라우터에서만 제어**하여
+  내부 라우팅과 외부 경로 제어를 분리했습니다.
 
-> 현재 버전은 “안정적인 장애 전환”을 우선했고, 트래픽 클래스 기반 분산은 Backlog로 정리했습니다.
+---
+
+### ISP 장애 감지 및 자동 전환 (IP SLA + Object Tracking)
+- 단순 Static Default Route는 링크가 살아 있어도
+  실제 외부 통신이 불가능한 상황을 감지하지 못하는 한계가 있습니다.
+- 이를 보완하기 위해 **IP SLA와 Object Tracking을 사용해**
+  ISP1 경로의 실제 도달 가능성을 주기적으로 검사하도록 구성했습니다.
+
+#### 동작 방식
+- IP SLA를 통해 외부 목적지(예: 공용 DNS 또는 ISP 측 IP)에 ICMP Echo 수행
+- Object Tracking으로 IP SLA 상태를 추적
+- Tracking 상태에 따라 Default Route를 자동으로 활성/비활성화
+
+ip sla 1
+ icmp-echo 8.8.8.8 source-interface GigabitEthernet0/0
+ip sla schedule 1 life forever start-time now
+
+track 1 ip sla 1 reachability
+
+ip route 0.0.0.0 0.0.0.0 100.1.1.1 track 1     ! ISP1 (Primary)
+ip route 0.0.0.0 0.0.0.0 100.1.1.17 5          ! ISP2 (Backup)
 
 ---
 
@@ -371,17 +397,81 @@ DHCP가 안 될 때, 라우팅부터 보기보다 먼저 아래를 확인했습�
 - **SPAN + 중앙 Syslog 수집 서버 구성**
 - **Access Port Security 정책 고도화**
 - **VLAN hopping 대응 설정을 템플릿화(Access/Trunk 공통 정책)**
+- EVE-NG에 Windows/Linux 서버를 배포하여 내부 Public IP 기반 HTTP 서비스 접근 시나리오 구현
 
 ---
 
-## 12) 참고 명령어(검증에 사용)
-- VLAN/SVI: `show vlan brief`, `show ip interface brief`, `show interfaces status`
-- Trunk: `show interfaces trunk`
-- MAC: `show mac address-table`
-- STP: `show spanning-tree`
-- 라우팅: `show ip route`
-- BGP: `show ip bgp summary`, `show ip bgp neighbors <x.x.x.x>`
-- SLA/Track: `show ip sla statistics`, `show track`, `show ip sla configuration 1`
-- NAT: `show ip nat translations`, `show ip nat statistics`
+## 12) 참고 명령어 (검증에 사용)
 
+### VLAN / SVI
+- `show vlan brief`
+- `show ip interface brief`
+- `show interfaces status`
+- `show interfaces vlan <vlan-id>`
+
+### Trunk / EtherChannel
+- `show interfaces trunk`
+- `show etherchannel summary`
+- `show etherchannel detail`
+
+### MAC / L2 학습
+- `show mac address-table`
+- `show mac address-table vlan <vlan-id>`
+
+### STP
+- `show spanning-tree`
+- `show spanning-tree vlan <vlan-id>`
+- `show spanning-tree summary`
+
+### OSPF
+- `show ip ospf neighbor`
+- `show ip ospf interface brief`
+- `show ip route ospf`
+- `show ip protocols`
+- `clear ip ospf process`
+
+### HSRP / Gateway 이중화
+- `show standby brief`
+- `show standby`
+
+### DHCP
+- `show ip dhcp binding`
+- `show ip dhcp pool`
+- `show run | section dhcp`
+- `debug ip dhcp server events`
+- `debug ip dhcp server packet`
+
+### Routing / Default Route
+- `show ip route`
+- `show ip route 0.0.0.0`
+
+### IP SLA / Object Tracking
+- `show ip sla statistics`
+- `show ip sla configuration 1`
+- `show track`
+- `show track 1`
+
+### BGP
+- `show ip bgp summary`
+- `show ip bgp`
+- `show ip bgp neighbors <x.x.x.x>`
+
+### NAT
+- `show ip nat translations`
+- `show ip nat statistics`
+
+### Management / SSH
+- `show ip ssh`
+- `show run | section line\ vty`
+- `show users`
+- `show access-lists`
+
+### Interface / 장애 분석
+- `show interfaces`
+- `show ip interfaces brief`
+- `show logging`
+- `show run`
+
+### Icmp
+- `debug ip icmp`
 ---
